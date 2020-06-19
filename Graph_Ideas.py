@@ -8,7 +8,7 @@ Created on Mon Jun 15 13:07:21 2020
 
 from bokeh.io import curdoc
 from bokeh.layouts import row, column, gridplot
-from bokeh.models import ColumnDataSource, ColorBar, LinearColorMapper, Slider, TextInput, Dropdown, Select
+from bokeh.models import ColumnDataSource, ColorBar, LinearColorMapper, Slider, TextInput, Dropdown, Select, Paragraph
 from bokeh.plotting import figure, show
 import numpy as np
 from scipy.interpolate import interp1d
@@ -18,7 +18,9 @@ from scipy.interpolate import interp1d
 amb_temp=list(range(10, 30))
 time_range=list(range(0,24))
 initial_dims=[3, 2, 1, .3]
+rh1=0.5
 materials=["Brick", "Cardboard", "Aluminum", "Concrete"]
+loc_and_time=["Bethlehem in June", "Bethlehem in January", "San Fransisco in June", "San Fransisco in January", "Florida in June", "Florida in January"]
 #brick=0.72,  cardboard=0.048,  aluminum=205,  concrete=0.8
 beth_hourly1=[66, 65, 64, 64, 64, 64, 64, 65, 66, 67, 70, 71, 73, 73, 72, 75, 76, 76, 76, 75, 75, 73, 71, 70] #hourly bethlhem temperatures for June 18, 2020
 beth_hourly1_C=[]
@@ -26,7 +28,7 @@ for i in beth_hourly1:
     beth_hourly1_C.append((i-32)*(5/9))
 
 #Q/t for heat conduction
-#dims=[length, width, height, thickness, sand_thickness]
+#dims=[length, width, height, sand_thickness]
 def calc_HC (temps, dims, conductivity, desired_temp):
     k=conductivity
     Area=2*(dims[0]*dims[2])+ 2*(dims[1]*dims[2])
@@ -47,20 +49,16 @@ source=ColumnDataSource(data=dict(time=time_range, output=out1))
 TOOLS = "crosshair,pan,undo,redo,reset,save,wheel_zoom,box_zoom, tap"
 
 g1=figure(title="Heat per Time", x_axis_label="Time (hours in the day, starting at 12am)", y_axis_label="Heat per Time", tools=TOOLS)
-g1.line('time', 'output', source=source, color="purple", legend_label="Heat Conduction")
+g1.line('time', 'output', source=source, color="purple", legend_label="Heat Conduction", line_dash=[4,4], line_width=3)
 g1.legend.click_policy="hide"
 
 slide_length=Slider(title="Length of Chamber", value=initial_dims[0], start=0, end=12, step=0.5)
 slide_width=Slider(title="Width of Chamber", value=initial_dims[1], start=0, end=12, step=0.5)
 slide_height=Slider(title="Height of Chamber", value=initial_dims[2], start=0, end=5, step=0.25)
-slide_thick=Slider(title="Thickness of Chamber Wall", value=initial_dims[3], start=0, end=1, step=0.001)
+slide_thick=Slider(title="Thickness of Sand Layer in Chamber Wall", value=initial_dims[3], start=0, end=1, step=0.001)
 select_material=Select(title="Choice of Material for Walls of the Chamber:", value="Brick", options=materials)
-slide_desired_temp=Slider(title="Desired Temperature for the Inner Chamber", value=20, start=0, end=40, step=0.5)
-
-
-
-
-
+slide_desired_temp=Slider(title="Desired Temperature for the Inner Chamber", value=20, start=2, end=50, step=0.5)
+location=Select(title="Location and Time of Year", value="Bethlehem in June", options=loc_and_time)
 
 
 
@@ -79,18 +77,25 @@ def evap_cool(mass, latent, time):
         cooling_rate.append((mass*latent[w]/(time[w]+1))/100)
     return cooling_rate
 
-evap_out=evap_cool(2, latent_out, time_range)   
-print(evap_out[0], evap_out[12])                         
+evap_out=evap_cool(4, latent_out, time_range)   
+#print(evap_out[0], evap_out[12])                         
 source3=ColumnDataSource(data=dict(time=time_range, evap_out=evap_out))
-g1.line('time', 'evap_out', source=source3, color='orange', legend_label="Evaporation Cooling Rate")
+g1.line('time', 'evap_out', source=source3, color='orange', legend_label="Evaporation Cooling Rate", line_width=3)
 
-
-
-
-
-
-
-g2=figure(title="Cost vs. Water Input", x_axis_label="Amount of Water Used per Day (in liters)", y_axis_label="Cost in $ per Year")
+#gh=theta(SA)(Xs-X)
+def water_needed(dims, temp, rh, SVP):
+    theta=1079*0.62198
+    SA=2*(dims[0]+dims[3]+.225)*dims[2] + 2*dims[2]*(dims[1]+dims[3]+.225)
+    A = 18.3036
+    B = 3816.44
+    C = -46.13
+    p_star=np.exp(A - B / (C + temp + 273))  # Antoine equation for vapor pressure at outside air
+    p_air=rh*p_star # bulk pressure of air at t bulk -- modified by SR - using rh instead of a constant value.
+    evap_rate=theta*(SVP-p_air)*SA*(18/1000) # in L/sec
+    return evap_rate
+    
+print(latent_heat(18))
+#g2=figure(title="Cost of Chamber for Different Materials and Varrying Daily Water Input Levels", x_axis_label="Amount of Water Used per Day (in liters)", y_axis_label="Cost in $ per Year")
 
 def cost_calc(dims, water_amount, mat):
     #dims=[brick_length, brick_width, brick_height, sand_thickness]
@@ -111,31 +116,32 @@ def cost_calc(dims, water_amount, mat):
     V1 = A1 * h  # inner brick volume
     V2 = A2 * h  # sand volume
     V3 = A3 * h  # outer brick volume
-    materials_cost=1900*0.037*V1 + 1905*.05*V2 + 1900*0.037*V3
-   # if mat=="Brick":
-    #   materials_cost= 1900*0.037*V1 + 1905*.05*V2 + 1900*0.037*V3
-    #elif mat=="Cardboard":
-     #   materials_cost=1905*0.5*V2 + (V1+V2)*
-    #elif mat=="Aluminum":
-     #   materials_cost=
-    #elif mat=="Concrete":
-     #   materials_cost==
-    #cost of brick is 0.037 $/kg
+    materials_cost=0
+    if mat=="Brick":
+       materials_cost= 1900*0.037*V1 + 1905*.05*V2 + 1900*0.037*V3
+       #Brick cost 0.037 $/Kg and density is 1900 Kg/m^3
+    elif mat=="Cardboard":
+        materials_cost=1905*0.5*V2 + (V1+V2)*(0.11*689)
+        #Cardboard cost $0.11/Kg and desnsity is 689 Kg/m^3
+    elif mat=="Aluminum":
+        materials_cost=1905*0.5*V2 + (V1+V2)*(1.754*2710)
+        #Aluminum cost is $1.754/Kg and density is 2710 Kg/m^3
+    elif mat=="Concrete":
+        materials_cost==1905*0.5*V2 + (V1+V2)*(98.425)
+        #Concrete cost is $98.425/m^3
     #cost of sand 0.05 $/kg
-    #Density of Brick (kg/m^3): 1900
     #Density of Sand (kg/m^3): 1905
-    water_list=[]
-    for x in water_amount:
-        water_list.append(x*0.0001*365)
-    final_cost=[]
-    for y in water_list:
-        final_cost.append(materials_cost+y)
+    water_cost=water_amount*0.0001*365
+    final_cost=materials_cost+water_cost
     return final_cost
 
-possible_water=list(range(0, 100))
-var_cost=cost_calc(initial_dims, possible_water, "Brick")
-source2=ColumnDataSource(data=dict(cost=var_cost, water=possible_water))
-g2.line('water', 'cost', source=source2, color='green', legend_label="Yearly Cost")
+price1=cost_calc(initial_dims, 35, "Brick")
+sourceP=ColumnDataSource(data=dict(price=[price1]))
+#source2=ColumnDataSource(data=dict(brick=cost_brick, concrete=cost_conc, aluminum=cost_alum, cardboard=cost_cardboard, water=possible_water))
+#g2.line('water', 'brick', source=source2, color='darkorange', legend_label="Brick")
+#g2.line('water', 'aluminum', source=source2, color="darkblue", legend_label="Aluminum")
+#g2.line('water', 'cardboard', source=source2, color='brown', legend_label="Cardboard")
+#g2.line('water', 'concrete', source=source2, color='teal', legend_label="Concrete")
 
 def update_data(attr, old, new):
     #Get Slider Values
@@ -156,19 +162,27 @@ def update_data(attr, old, new):
         cond=0.8
     dims=[length, width, height, thick]
     out=calc_HC(beth_hourly1_C, dims, cond, want_temp)
-    cost=cost_calc(dims, possible_water, mat)
+    price=cost_calc(dims, 35, mat)
     source.data=dict(time=time_range, output=out)
-    source2.data=dict(cost=cost, water=possible_water)
-    
+    sourceP.data=dict(price=price)
+   # source2=ColumnDataSource(data=dict(brick=cost_B, concrete=cost_Conc, aluminum=cost_Al, cardboard=cost_Card, water=possible_water))
+
 updates=[select_material, slide_length, slide_height, slide_width, slide_thick, slide_desired_temp]
 for u in [select_material, slide_length, slide_height, slide_width, slide_thick, slide_desired_temp]:
     u.on_change('value', update_data)
+
+priceP=sourceP.data['price']
+#trial2="The amount of water needed per day is "+str(round(first_water, 2))+" liters"
+#print(priceP[0])
+trial_text="The yearly cost of the cooling chamber you have created is: $" + str(round(priceP[0], 2))
+chamber_price=Paragraph(text=trial_text)
+#waterL=Paragraph(text=trial2)
+
                        
-widgets=column(select_material, slide_length, slide_height, slide_width, slide_thick, slide_desired_temp)
+widgets=column(location, select_material, slide_length, slide_height, slide_width, slide_thick, slide_desired_temp, chamber_price)
 
 
-graphs=row(g1, g2)
-curdoc().add_root(row(widgets, graphs))
+curdoc().add_root(row(widgets, g1))
 curdoc().title="Heat Transfer and Cost for ZECC Model"
 
 
